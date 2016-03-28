@@ -1,0 +1,236 @@
+
+R version 3.2.4 Revised (2016-03-16 r70336) -- "Very Secure Dishes"
+Copyright (C) 2016 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> # Some simple tests of PortfolioAnalytics package showing errors/bugs(?) even...
+> # 
+> ###############################################################################
+> 
+> library(quantmod)
+Loading required package: xts
+Loading required package: zoo
+
+Attaching package: ‘zoo’
+
+The following objects are masked from ‘package:base’:
+
+    as.Date, as.Date.numeric
+
+Loading required package: TTR
+Version 0.4-0 included new data defaults. See ?getSymbols.
+> library(PerformanceAnalytics)
+
+Package PerformanceAnalytics (1.4.4000) loaded.
+Copyright (c) 2004-2015 Peter Carl and Brian G. Peterson, GPL-2 | GPL-3
+http://r-forge.r-project.org/projects/returnanalytics/
+
+
+Attaching package: ‘PerformanceAnalytics’
+
+The following object is masked from ‘package:graphics’:
+
+    legend
+
+> library(PortfolioAnalytics)
+Loading required package: foreach
+foreach: simple, scalable parallel programming from Revolution Analytics
+Use Revolution R for scalability, fault tolerance and more.
+http://www.revolutionanalytics.com
+> library(parallel)
+> library(doParallel)
+Loading required package: iterators
+> 
+> 
+> Sys.setenv(TZ="UTC")
+> 
+> symbols <- c("VTI", "VGK", "EWJ", "EEM", "IEF", "TLT", "ICF", "RWX", "DBC", "GLD")
+> 
+> transformTo <- "monthly"#NULL#"monthly"#"weekly"
+> startDateData <- "1995-01-01"
+> startDateAnalysis <- "1995-01-01"
+> subset <- "1995-01-01"
+> 
+> data <- new.env()
+> 
+> getSymbols(symbols, from=startDateData, auto.assign=TRUE, env=data)
+    As of 0.4-0, ‘getSymbols’ uses env=parent.frame() and
+ auto.assign=TRUE by default.
+
+ This  behavior  will be  phased out in 0.5-0  when the call  will
+ default to use auto.assign=FALSE. getOption("getSymbols.env") and 
+ getOptions("getSymbols.auto.assign") are now checked for alternate defaults
+
+ This message is shown once per session and may be disabled by setting 
+ options("getSymbols.warning4.0"=FALSE). See ?getSymbols for more details.
+pausing 1 second between requests for more than 5 symbols
+pausing 1 second between requests for more than 5 symbols
+pausing 1 second between requests for more than 5 symbols
+pausing 1 second between requests for more than 5 symbols
+pausing 1 second between requests for more than 5 symbols
+pausing 1 second between requests for more than 5 symbols
+ [1] "VTI" "VGK" "EWJ" "EEM" "IEF" "TLT" "ICF" "RWX" "DBC" "GLD"
+> for (symbol in symbols) {
++ 	assign(symbol, adjustOHLC(get(symbol, envir=data), symbol.name=symbol), envir=data)
++ }
+> 
+> startDateData <- max(do.call("c", eapply(data, function(x) index(first(x)))))
+> 
+> prices <- do.call(cbind, lapply(symbols, function(symbol) {
++ 														tmpData <- get(symbol, envir=data)
++ 														
++ 														if (!is.null(transformTo)) {
++ 															if (transformTo == "monthly") {
++ 																tmpData <- to.monthly(tmpData, drop.time=FALSE)
++ 															} else if (transformTo == "weekly") {
++ 																tmpData <- to.weekly(tmpData, drop.time=FALSE)
++ 															}
++ 														}
++ 														
++ 														return(Cl(tmpData))
++ 														}))
+> 										
+> colnames(prices) <- paste(symbols, "close", sep=".")
+> returns.all <- CalculateReturns(prices)
+> colnames(returns.all) <- paste(symbols, "return", sep=".")
+> 
+> subsetData <- paste0(startDateData, "/")
+> 
+> returns <- returns.all[subsetData]
+> 
+> init.portfolio <- portfolio.spec(assets=symbols)
+> init.portfolio <- add.constraint(portfolio=init.portfolio, type = "long_only")
+> init.portfolio <- add.constraint(init.portfolio, type="box", min=0.0, max=2.0)
+> init.portfolio <- add.constraint(init.portfolio, type="weight_sum", min_sum=0.99, max_sum=2.01)#, max_sum=1.01)
+> init.portfolio <- add.objective(init.portfolio, type="return", name="mean", multiplier=0)
+> 
+> volatilityTarget <- 0.15
+> naiveRP.portfolio <- init.portfolio
+> naiveRP.portfolio <- add.objective(naiveRP.portfolio, type="risk_budget", name="var", min_concentration=TRUE)
+> # TODO: If I enable the following objevtive (portfolio volatility target) the subsequent code (from line 74) does not run and results are not as expected
+> naiveRP.portfolio <- add.objective(naiveRP.portfolio, type="risk", name="StdDev", target=volatilityTarget, enabled=TRUE)
+> 
+> numberOfCores <- detectCores(logical=FALSE)
+> cl <- makeCluster(numberOfCores)
+> registerDoParallel(cl)
+> 
+> naiveRP <- optimize.portfolio(returns, naiveRP.portfolio, optimize_method="DEoptim", search_size=5000, trace=TRUE, traceDE=0)
+ [1] 0.00800000 0.05200000 0.00800000 0.01200000 0.02354529 0.01946556
+ [7] 1.76268208 0.07400000 0.02940525 0.00400000
+> 
+> stopCluster(cl)
+> 
+> # TODO: This does not work if volatility target objective is enabled:
+> #Error in pct_contrib[[idx[ii]]] : attempt to select less than one element
+> chart.RiskBudget(naiveRP, 
++ 				 match.col="var",
++ 				 main="Equal var Component Contribution", 
++ 				 risk.type="percentage",#"absolute" 
++ 				 neighbors=NULL)
+Error in pct_contrib[[idx[ii]]] : attempt to select less than one element
+> # TODO: Does not work at all:
+> #Error in applyFUN(R = R, weights = wts, FUN = risk.col) : 
+> #		argument "arguments" is missing, with no default
+> chart.Concentration(naiveRP, 
++ 					risk.col='var',#'ES'
++ 					conc.type="pct_contrib", #"weights",#c("weights", "pct_contrib")
++ 					chart.assets=TRUE)
+Error in applyFUN(R = R, weights = wts, FUN = risk.col) : 
+  argument "arguments" is missing, with no default
+In addition: Warning message:
+In chart.Concentration(naiveRP, risk.col = "var", conc.type = "pct_contrib",  :
+  mean or var do  not match extractStats output of $objective_measures slot
+> charts.PerformanceSummary(Return.portfolio(returns, extractWeights(naiveRP)))
+Warning message:
+In Return.portfolio(returns, extractWeights(naiveRP)) :
+  NA's detected: filling NA's with zeros
+> chart.Weights(naiveRP, main="Naive Risk Parity Weights")
+> # Rebalancing parameters
+> # Set rebalancing frequency
+> rebalanceFrequency <- "months"
+> # Training Period
+> trainingPeriod <- 24
+> # ROlling window
+> rollingWindow <- 24
+> 
+> numberOfCores <- detectCores(logical=FALSE)
+> cl <- makeCluster(numberOfCores)
+> registerDoParallel(cl)
+> 
+> naiveRP.rebalanced <- optimize.portfolio.rebalancing(returns, 
++ 													 naiveRP.portfolio, 
++ 													 rebalance_on=rebalanceFrequency, 
++ 													 training_period=trainingPeriod, 
++ 													 rolling_window=rollingWindow, 
++ 													 optimize_method="DEoptim", 
++ 													 search_size=5000, 
++ 													 traceDE=0,
++ 													 message=TRUE)
+overall elapsed time:6.43769165674845
+> 
+> stopCluster(cl)
+> # TODO: There is an issue with extractWeights function
+> #> extractWeights(naiveRP.rebalanced)
+> #Error in as.POSIXlt.character(x, tz, ...) : 
+> #		character string is not in a standard unambiguous format
+> # TODO: How to get returns actually?
+> charts.PerformanceSummary(Return.portfolio(returns, extractWeights(naiveRP.rebalanced), rebalance_on=rebalanceFrequency))
+Error in as.POSIXlt.character(x, tz, ...) : 
+  character string is not in a standard unambiguous format
+In addition: Warning message:
+In Return.portfolio(returns, extractWeights(naiveRP.rebalanced),  :
+  NA's detected: filling NA's with zeros
+> # TODO: Fails
+> #Error in as.POSIXlt.character(x, tz, ...) : 
+> #		character string is not in a standard unambiguous format
+> chart.Weights(naiveRP.rebalanced, main="Naive Risk Parity Weights", col=bluemono)
+Error in as.POSIXlt.character(x, tz, ...) : 
+  character string is not in a standard unambiguous format
+> # TODO: Fails
+> #Error in as.POSIXlt.character(x, tz, ...) : 
+> #		character string is not in a standard unambiguous format
+> chart.RiskBudget(naiveRP.rebalanced, risk.type="pct_contrib")
+Error in as.POSIXlt.character(x, tz, ...) : 
+  character string is not in a standard unambiguous format
+> sessionInfo()
+R version 3.2.4 Revised (2016-03-16 r70336)
+Platform: x86_64-pc-linux-gnu (64-bit)
+Running under: Ubuntu 14.04.4 LTS
+
+locale:
+ [1] LC_CTYPE=en_US.UTF-8          LC_NUMERIC=C                 
+ [3] LC_TIME=en_US.UTF-8           LC_COLLATE=en_US.UTF-8       
+ [5] LC_MONETARY=en_US.UTF-8       LC_MESSAGES=en_US.UTF-8      
+ [7] LC_PAPER=en_US.UTF-8          LC_NAME=en_US.UTF-8          
+ [9] LC_ADDRESS=en_US.UTF-8        LC_TELEPHONE=en_US.UTF-8     
+[11] LC_MEASUREMENT=en_US.UTF-8    LC_IDENTIFICATION=en_US.UTF-8
+
+attached base packages:
+[1] parallel  stats     graphics  grDevices utils     datasets  methods  
+[8] base     
+
+other attached packages:
+ [1] doParallel_1.0.8              iterators_1.0.7              
+ [3] PortfolioAnalytics_1.0.3636   foreach_1.4.2                
+ [5] PerformanceAnalytics_1.4.4000 quantmod_0.4-5               
+ [7] TTR_0.23-0                    xts_0.9-8                    
+ [9] zoo_1.7-13                    rj_2.0.4-2                   
+
+loaded via a namespace (and not attached):
+[1] rj.gd_2.0.0-1    lattice_0.20-33  codetools_0.2-14 grid_3.2.4      
+[5] DEoptim_2.2-3    tools_3.2.4      compiler_3.2.4  
+
